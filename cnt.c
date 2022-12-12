@@ -47,9 +47,7 @@ struct cnt *cnt_alloc(size_t n) {
 	// CNT_RAND is purposefully uninitialised
 	CNT_CLSZ(cnt) = cl_sz;
 	CNT_PADSZ(cnt) = padding_sz;
-	for (size_t it = 0; it < n; ++it) {
-		*CNT_IDX(cnt, n, it) = 0;
-	}
+	// CNT_CNT is purposefully uninitialised
 	return (struct cnt *)cnt;
 }
 
@@ -86,9 +84,9 @@ size_t cnt_id(struct cnt *cnt) {
 #endif
 
 inline void cnt_inc(struct cnt *cnt, size_t id) {
-	#ifndef NDEBUG
 	size_t n = CNT_N(cnt);
-	if (id >= n) {
+	#ifndef NDEBUG
+	if (id >= *CNT_OCCUPIED(cnt)) {
 		fputs("cnt_inc: id is out-of-bounds\n", stderr);
 		abort();
 	}
@@ -117,13 +115,12 @@ double rc(void) {
     clock_gettime(CLOCK_REALTIME, &(now));
     return now.tv_sec + (now.tv_nsec * 1e-9);
 }
-void clk(void) {
-	static double c = 0;
-	if (c == 0) {
-		c = rc();
+void clk(double *c) {
+	if (*c == 0) {
+		*c = rc();
 	} else {
-		printf("%lfs\n", rc() - c);
-		c = 0;
+		printf("%lfs\n", rc() - *c);
+		*c = 0;
 	}
 	return;
 }
@@ -138,7 +135,7 @@ void *thread_main(void *_cnt) {
 }
 
 char spawn(struct cnt **cnt) {
-	*cnt = cnt_alloc(16);
+	*cnt = cnt_alloc(N_THREADS);
 	if (cnt == NULL) {
 		return 0;
 	}
@@ -161,12 +158,13 @@ char spawn(struct cnt **cnt) {
 
 int main(void) {
 	struct cnt *cnt;
-	clk();
+	double c = 0;
+	clk(&(c));
 	char s = spawn(&(cnt));
 	if (!s) {
 		exit(1);
 	}
-	clk();
+	clk(&(c));
 	printf("%zu\n", cnt_sum(cnt));
 	cnt_free(cnt);
 	return 0;
