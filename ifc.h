@@ -104,7 +104,7 @@ static size_t ifc_sum(struct ifc *ifc) {
 
 	size_t output = 0;
 	for (size_t idx = 0; idx < occupied; ++idx) {
-		output += *IFC_IDX(ifc, n, idx);
+		output += atomic_load_explicit(IFC_IDX(ifc, n, idx), __ATOMIC_RELAXED);
 	}
 
 	return output;

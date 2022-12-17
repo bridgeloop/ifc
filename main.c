@@ -58,7 +58,11 @@ int main(void) {
 		exit(1);
 	}
 	clk(&(c));
-	printf("%zu\n", ifc_sum(ifc));
+	c = 0;
+	clk(&(c));
+	size_t sum = ifc_sum(ifc);
+	clk(&(c));
+	printf("%zu\n", sum);
 	ifc_free(ifc);
 	return 0;
 }
