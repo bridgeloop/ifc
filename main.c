@@ -29,7 +29,7 @@ void *thread_main(void *_ifc) {
 
 char spawn(struct ifc **ifc) {
 	*ifc = ifc_alloc(N_THREADS, sizeof(size_t));
-	if (ifc == NULL) {
+	if (*ifc == NULL) {
 		return 0;
 	}
 	ifc_iter(size_t)(*ifc, area) {

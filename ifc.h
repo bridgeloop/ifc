@@ -46,7 +46,7 @@ static struct ifc *ifc_alloc(size_t n, unsigned short int sz) {
 		area_sz,
 		padding_sz;
 	if (sz == 0) {
-		cl_sz = 1;
+		cl_sz = sizeof(void *);
 		area_sz = 0;
 		padding_sz = 0;
 	} else {
@@ -128,6 +128,9 @@ static void ifc_release(struct ifc *ifc, void *area) {
 static inline void *ifc_reap(struct ifc *ifc, void *area) {
 	struct ifc_head *head = IFC_HEAD(ifc);
 	if (area == NULL) {
+		if (head->area_sz == 0) {
+			return NULL;
+		}
 		return IFC_AREA(ifc, 0);
 	}
 	area = (void *)((size_t)area + head->area_sz);
