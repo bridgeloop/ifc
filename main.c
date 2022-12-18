@@ -20,15 +20,16 @@ void clk(double *c) {
 
 void *thread_main(void *_ifc) {
 	struct ifc *ifc = _ifc;
-	pthread_t shit = ifc_id(ifc);
+	size_t *area = ifc_area(ifc);
+	*area = 0;
 	for (size_t it = 0; it < 0x10000; ++it) {
-		ifc_inc(ifc, shit);
+		++(*area);
 	}
 	return NULL;
 }
 
 char spawn(struct ifc **ifc) {
-	*ifc = ifc_alloc(N_THREADS);
+	*ifc = ifc_alloc(N_THREADS, sizeof(size_t));
 	if (ifc == NULL) {
 		return 0;
 	}
@@ -60,7 +61,10 @@ int main(void) {
 	clk(&(c));
 	c = 0;
 	clk(&(c));
-	size_t sum = ifc_sum(ifc);
+	size_t sum = 0;
+	ifc_iter(size_t)(ifc, area) {
+		sum += *area;
+	}
 	clk(&(c));
 	printf("%zu\n", sum);
 	ifc_free(ifc);

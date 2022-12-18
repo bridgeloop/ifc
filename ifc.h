@@ -2,112 +2,136 @@
 #define IFC_H
 
 #include <pthread.h>
-#include <stdatomic.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 
+struct ifc_head {
+	const size_t n;
+	const unsigned short int area_sz;
+	const unsigned short int padding_sz;
+};
+struct ifc_tid {
+	_Atomic unsigned char occupied;
+	pthread_t tid;
+};
+
+#define _ifc_iter(ifc, area) *area = NULL; (area = ifc_reap(ifc, area)) != NULL;)
+#define ifc_iter(type) for (type _ifc_iter
+
 #define IFC_OFFSET(ifc, x) ((void *)((unsigned char *)ifc + x))
-#define IFC_OCCUPIED(ifc) ((_Atomic size_t *)IFC_OFFSET(ifc, 0))
-#define IFC_N(ifc) (*(size_t *)IFC_OFFSET(ifc, sizeof(size_t)))
-#define IFC_RAND(ifc) ((unsigned int *)IFC_OFFSET(ifc, (sizeof(size_t) * 2)))
-#define IFC_CLSZ(ifc) (*(unsigned short int *)IFC_OFFSET(ifc, (sizeof(size_t) * 2) + sizeof(unsigned int)))
-#define IFC_PADSZ(ifc) (*(unsigned short int *)IFC_OFFSET(ifc, (sizeof(size_t) * 2) + sizeof(unsigned int) + sizeof(unsigned short int)))
-#define IFC_TID(ifc) ((pthread_t *)IFC_OFFSET(ifc, (sizeof(size_t) * 2) + sizeof(unsigned int) + (sizeof(unsigned short int) * 2)))
-#define IFC_CNT(ifc, n) ((unsigned char *)IFC_OFFSET(ifc, (sizeof(size_t) * 2) + sizeof(unsigned int) + (sizeof(unsigned short int)) * 2 + (sizeof(pthread_t) * n) + IFC_PADSZ(ifc)))
-#define IFC_IDX(ifc, n, idx) ((_Atomic size_t *)(IFC_CNT(ifc, n) + (IFC_CLSZ(ifc) * idx)))
+#define IFC_HEAD(ifc) ((struct ifc_head *)IFC_OFFSET(ifc, 0))
+#define IFC_TID(ifc) ((struct ifc_tid *)IFC_OFFSET(ifc, sizeof(struct ifc_head)))
+#define IFC_AREAS(ifc) ((unsigned char *)IFC_OFFSET(ifc, sizeof(struct ifc_head) + (sizeof(struct ifc_tid) * IFC_HEAD(ifc)->n) + IFC_HEAD(ifc)->padding_sz))
+#define IFC_AREA(ifc, idx) (void *)(IFC_AREAS(ifc) + (IFC_HEAD(ifc)->area_sz * idx))
 
 struct ifc;
-
-static struct ifc *ifc_alloc(size_t n) {
-	size_t sz_before_padding =
-		sizeof(_Atomic size_t) + // occupied
-		sizeof(size_t) + // n
-		sizeof(unsigned int) + // rand seed
-		sizeof(unsigned short int) + // cacheline size
-		sizeof(unsigned short int) + // padding size
-		(sizeof(pthread_t) * n); // tid
-	unsigned short int cl_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-	if (cl_sz < sizeof(size_t)) {
-		cl_sz = sizeof(size_t);
-	}
-	unsigned short int padding_sz = (cl_sz - (sz_before_padding % cl_sz)) % cl_sz;
-	void *ifc;
-	posix_memalign(
-		&(ifc),
-		cl_sz,
-		(
-			sz_before_padding +
-			padding_sz + // padding
-			(cl_sz * n) // ifc
-		)
-	);
-	if (ifc == NULL) {
-		return NULL;
-	}
-	*IFC_OCCUPIED(ifc) = 0;
-	IFC_N(ifc) = n;
-	// IFC_RAND is purposefully uninitialised
-	IFC_CLSZ(ifc) = cl_sz;
-	IFC_PADSZ(ifc) = padding_sz;
-	// IFC_CNT is purposefully uninitialised
-	return (struct ifc *)ifc;
-}
 
 static void ifc_free(struct ifc *ifc) {
 	free(ifc);
 	return;
 }
 
-static size_t ifc_id(struct ifc *ifc) {
-	pthread_t self = pthread_self();
-
-	_Atomic size_t *occupied = IFC_OCCUPIED(ifc);
-	pthread_t *tid = IFC_TID(ifc);
-	size_t exp = *occupied;
-	for (size_t idx = 0; idx < exp; ++idx) {
-		if (pthread_equal(tid[idx], self)) {
-			return idx;
-		}
+static struct ifc *ifc_alloc(size_t n, unsigned short int sz) {
+	size_t sz_before_padding =
+		sizeof(struct ifc_head) +
+		(sizeof(struct ifc_tid) * n); // tid
+	assert(sysconf(_SC_LEVEL1_DCACHE_LINESIZE) <= (unsigned short int)~0);
+	unsigned short int cl_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+	unsigned short int diff = (cl_sz - (sz % cl_sz)) % cl_sz;
+	if ((unsigned short int)~0 - sz < diff) {
+		return NULL;
 	}
-
-	size_t n = IFC_N(ifc);
-	do {
-		if (exp == n) {
-			return rand_r(IFC_RAND(ifc)) % n;
-		}
-	} while (!atomic_compare_exchange_weak(occupied, &(exp), exp + 1));
-
-	memcpy(&(tid[exp]), &(self), sizeof(pthread_t));
-	return exp;
+	unsigned short int area_sz = sz + diff;
+	unsigned short int padding_sz = (cl_sz - (sz_before_padding % cl_sz)) % cl_sz;
+	void *ifc;
+	if (
+		posix_memalign(
+			&(ifc),
+			cl_sz,
+			(
+				sz_before_padding +
+				padding_sz +
+				(area_sz * n)
+			)
+		) != 0
+	) {
+		return NULL;
+	}
+	struct ifc_head *head = IFC_HEAD(ifc);
+	*(size_t *)&(head->n) = n;
+	*(unsigned short int *)&(head->area_sz) = area_sz;
+	*(unsigned short int *)&(head->padding_sz) = padding_sz;
+	struct ifc_tid *tid = IFC_TID(ifc);
+	for (size_t idx = 0; idx < n; ++idx) {
+		tid[idx].occupied = 0;
+	}
+	// IFC_AREAS are purposefully uninitialised
+	return (struct ifc *)ifc;
 }
 
-#ifndef NDEBUG
-#include <stdio.h>
-#endif
+static void *ifc_area(struct ifc *ifc) {
+	pthread_t self = pthread_self();
 
-inline static void ifc_inc(struct ifc *ifc, size_t id) {
-	size_t n = IFC_N(ifc);
-	#ifndef NDEBUG
-	if (id >= *IFC_OCCUPIED(ifc)) {
-		fputs("ifc_inc: id is out-of-bounds\n", stderr);
-		abort();
+	struct ifc_head *head = IFC_HEAD(ifc);
+	size_t n = head->n;
+	struct ifc_tid *tid = IFC_TID(ifc);
+	size_t likely_unoccupied = n;
+	for (size_t idx = 0; idx < n; ++idx) {
+		if (!tid[idx].occupied) {
+			likely_unoccupied = idx;
+			continue;
+		}
+		if (pthread_equal(tid[idx].tid, self)) {
+			return IFC_AREA(ifc, idx);
+		}
 	}
-	#endif
-	*IFC_IDX(ifc, n, id) += 1;
+
+	#pragma GCC unroll 2
+	for (int it = 0; it < 2; ++it) {
+		for (size_t idx = likely_unoccupied; idx < n; ++idx) {
+			if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_ACQUIRE)) {
+				memcpy(&(tid[idx].tid), &(self), sizeof(pthread_t));
+				return IFC_AREA(ifc, idx);
+			}
+		}
+		n = likely_unoccupied;
+		likely_unoccupied = 0;
+	}
+
+	return NULL;
+}
+
+static void ifc_release(struct ifc *ifc, void *area) {
+	struct ifc_head *head = IFC_HEAD(ifc);
+	struct ifc_tid *tid = IFC_TID(ifc);
+	size_t idx = (size_t)((unsigned char *)area - IFC_AREAS(ifc)) / head->area_sz;
+	assert(pthread_equal(tid[idx].tid, pthread_self()));
+	__atomic_clear(&(tid[idx].occupied), __ATOMIC_RELEASE);
 	return;
 }
 
-static size_t ifc_sum(struct ifc *ifc) {
-	size_t occupied = *IFC_OCCUPIED(ifc);
-	size_t n = IFC_N(ifc);
-
-	size_t output = 0;
-	for (size_t idx = 0; idx < occupied; ++idx) {
-		output += atomic_load_explicit(IFC_IDX(ifc, n, idx), __ATOMIC_RELAXED);
+static inline void *ifc_reap(struct ifc *ifc, void *area) {
+	struct ifc_head *head = IFC_HEAD(ifc);
+	size_t idx;
+	if (area == NULL) {
+		idx = 0;
+	} else {
+		idx = (size_t)((unsigned char *)area - IFC_AREAS(ifc)) / head->area_sz + 1;
 	}
 
-	return output;
+	struct ifc_tid *tid = IFC_TID(ifc);
+	for (;;) {
+		if (idx == head->n) {
+			return NULL;
+		}
+		if (tid[idx].occupied) {
+			break;
+		}
+		idx += 1;
+	}
+	return IFC_AREA(ifc, idx);
 }
 
 #endif
