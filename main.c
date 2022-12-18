@@ -21,7 +21,6 @@ void clk(double *c) {
 void *thread_main(void *_ifc) {
 	struct ifc *ifc = _ifc;
 	size_t *area = ifc_area(ifc);
-	*area = 0;
 	for (size_t it = 0; it < 0x10000; ++it) {
 		++(*area);
 	}
@@ -32,6 +31,9 @@ char spawn(struct ifc **ifc) {
 	*ifc = ifc_alloc(N_THREADS, sizeof(size_t));
 	if (ifc == NULL) {
 		return 0;
+	}
+	ifc_iter(size_t)(*ifc, area) {
+		*area = 0;
 	}
 	pthread_t threads[N_THREADS];
 	for (size_t it = 0; it < N_THREADS; ++it) {

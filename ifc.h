@@ -24,7 +24,7 @@ struct ifc_tid {
 #define IFC_HEAD(ifc) ((struct ifc_head *)IFC_OFFSET(ifc, 0))
 #define IFC_TID(ifc) ((struct ifc_tid *)IFC_OFFSET(ifc, sizeof(struct ifc_head)))
 #define IFC_AREAS(ifc) ((unsigned char *)IFC_OFFSET(ifc, sizeof(struct ifc_head) + (sizeof(struct ifc_tid) * IFC_HEAD(ifc)->n) + IFC_HEAD(ifc)->padding_sz))
-#define IFC_AREA(ifc, idx) (void *)(IFC_AREAS(ifc) + (IFC_HEAD(ifc)->area_sz * idx))
+#define IFC_AREA(ifc, idx) ((void *)(IFC_AREAS(ifc) + (IFC_HEAD(ifc)->area_sz * (idx))))
 
 struct ifc;
 
@@ -34,17 +34,30 @@ static void ifc_free(struct ifc *ifc) {
 }
 
 static struct ifc *ifc_alloc(size_t n, unsigned short int sz) {
+	if (n == 0) {
+		return NULL;
+	}
 	size_t sz_before_padding =
 		sizeof(struct ifc_head) +
 		(sizeof(struct ifc_tid) * n); // tid
 	assert(sysconf(_SC_LEVEL1_DCACHE_LINESIZE) <= (unsigned short int)~0);
-	unsigned short int cl_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
-	unsigned short int diff = (cl_sz - (sz % cl_sz)) % cl_sz;
-	if ((unsigned short int)~0 - sz < diff) {
-		return NULL;
+	unsigned short int
+		cl_sz,
+		area_sz,
+		padding_sz;
+	if (sz == 0) {
+		cl_sz = 1;
+		area_sz = 0;
+		padding_sz = 0;
+	} else {
+		cl_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+		unsigned short int diff = (cl_sz - (sz % cl_sz)) % cl_sz;
+		if ((unsigned short int)~0 - sz < diff) {
+			return NULL;
+		}
+		area_sz = sz + diff;
+		padding_sz = (cl_sz - (sz_before_padding % cl_sz)) % cl_sz;
 	}
-	unsigned short int area_sz = sz + diff;
-	unsigned short int padding_sz = (cl_sz - (sz_before_padding % cl_sz)) % cl_sz;
 	void *ifc;
 	if (
 		posix_memalign(
@@ -114,24 +127,14 @@ static void ifc_release(struct ifc *ifc, void *area) {
 
 static inline void *ifc_reap(struct ifc *ifc, void *area) {
 	struct ifc_head *head = IFC_HEAD(ifc);
-	size_t idx;
 	if (area == NULL) {
-		idx = 0;
-	} else {
-		idx = (size_t)((unsigned char *)area - IFC_AREAS(ifc)) / head->area_sz + 1;
+		return IFC_AREA(ifc, 0);
 	}
-
-	struct ifc_tid *tid = IFC_TID(ifc);
-	for (;;) {
-		if (idx == head->n) {
-			return NULL;
-		}
-		if (tid[idx].occupied) {
-			break;
-		}
-		idx += 1;
+	area = (void *)((size_t)area + head->area_sz);
+	if (area == IFC_AREA(ifc, head->n + 1)) {
+		return NULL;
 	}
-	return IFC_AREA(ifc, idx);
+	return area;
 }
 
 #endif
