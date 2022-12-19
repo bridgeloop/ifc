@@ -92,7 +92,7 @@ static void *ifc_area(struct ifc *ifc) {
 		likely_unoccupied = head->n;
 	struct ifc_tid *tid = IFC_TID(ifc);
 	for (unsigned int idx = 0; idx < n; ++idx) {
-		if (!__atomic_load_n(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
+		if (!tid[idx].occupied) {
 			likely_unoccupied = idx;
 			continue;
 		}
