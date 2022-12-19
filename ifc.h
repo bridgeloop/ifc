@@ -92,7 +92,7 @@ static void *ifc_area(struct ifc *ifc) {
 	struct ifc_tid *tid = IFC_TID(ifc);
 	size_t likely_unoccupied = n;
 	for (size_t idx = 0; idx < n; ++idx) {
-		if (!tid[idx].occupied) {
+		if (!__atomic_load_n(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
 			likely_unoccupied = idx;
 			continue;
 		}
@@ -104,8 +104,8 @@ static void *ifc_area(struct ifc *ifc) {
 	#pragma GCC unroll 2
 	for (int it = 0; it < 2; ++it) {
 		for (size_t idx = likely_unoccupied; idx < n; ++idx) {
-			if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_ACQUIRE)) {
-				memcpy(&(tid[idx].tid), &(self), sizeof(pthread_t));
+			if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
+				tid[idx].tid = self;
 				return IFC_AREA(ifc, idx);
 			}
 		}

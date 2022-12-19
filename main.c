@@ -24,6 +24,7 @@ void *thread_main(void *_ifc) {
 	for (size_t it = 0; it < 0x10000; ++it) {
 		++(*area);
 	}
+	ifc_release(ifc, area);
 	return NULL;
 }
 
