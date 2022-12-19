@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 struct ifc_head {
-	const size_t n;
+	const unsigned int n;
 	const unsigned short int area_sz;
 	const unsigned short int padding_sz;
 };
@@ -32,11 +32,11 @@ static void ifc_free(struct ifc *ifc) {
 	return;
 }
 
-static struct ifc *ifc_alloc(size_t n, unsigned short int sz) {
+static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 	if (n == 0) {
 		return NULL;
 	}
-	size_t sz_before_padding =
+	unsigned long int sz_before_padding =
 		sizeof(struct ifc_head) +
 		(sizeof(struct ifc_tid) * n); // tid
 	assert(sysconf(_SC_LEVEL1_DCACHE_LINESIZE) <= (unsigned short int)~0);
@@ -72,11 +72,11 @@ static struct ifc *ifc_alloc(size_t n, unsigned short int sz) {
 		return NULL;
 	}
 	struct ifc_head *head = IFC_HEAD(ifc);
-	*(size_t *)&(head->n) = n;
+	*(unsigned int *)&(head->n) = n;
 	*(unsigned short int *)&(head->area_sz) = area_sz;
 	*(unsigned short int *)&(head->padding_sz) = padding_sz;
 	struct ifc_tid *tid = IFC_TID(ifc);
-	for (size_t idx = 0; idx < n; ++idx) {
+	for (unsigned int idx = 0; idx < n; ++idx) {
 		tid[idx].occupied = 0;
 	}
 	// IFC_AREAS are purposefully uninitialised
@@ -87,10 +87,11 @@ static void *ifc_area(struct ifc *ifc) {
 	pthread_t self = pthread_self();
 
 	struct ifc_head *head = IFC_HEAD(ifc);
-	size_t n = head->n;
+	unsigned int
+		n = head->n,
+		likely_unoccupied = head->n;
 	struct ifc_tid *tid = IFC_TID(ifc);
-	size_t likely_unoccupied = n;
-	for (size_t idx = 0; idx < n; ++idx) {
+	for (unsigned int idx = 0; idx < n; ++idx) {
 		if (!__atomic_load_n(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
 			likely_unoccupied = idx;
 			continue;
@@ -102,7 +103,7 @@ static void *ifc_area(struct ifc *ifc) {
 
 	#pragma GCC unroll 2
 	for (int it = 0; it < 2; ++it) {
-		for (size_t idx = likely_unoccupied; idx < n; ++idx) {
+		for (unsigned int idx = likely_unoccupied; idx < n; ++idx) {
 			if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
 				tid[idx].tid = self;
 				return IFC_AREA(ifc, idx);
