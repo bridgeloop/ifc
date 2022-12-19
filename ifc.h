@@ -5,7 +5,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
 
 struct ifc_head {
 	const size_t n;
