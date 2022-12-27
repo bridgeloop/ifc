@@ -1,3 +1,21 @@
+/*
+	ISC License
+	
+	Copyright (c) 2022, aiden (aiden@cmp.bz)
+	
+	Permission to use, copy, modify, and/or distribute this software for any
+	purpose with or without fee is hereby granted, provided that the above
+	copyright notice and this permission notice appear in all copies.
+	
+	THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+	WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+	MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+	ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+	WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+	ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+	OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+*/
+
 #ifndef IFC_H
 #define IFC_H
 
@@ -39,7 +57,6 @@ static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 	unsigned long int sz_before_padding =
 		sizeof(struct ifc_head) +
 		(sizeof(struct ifc_tid) * n); // tid
-	assert(sysconf(_SC_LEVEL1_DCACHE_LINESIZE) <= (unsigned short int)~0);
 	unsigned short int
 		cl_sz,
 		area_sz,
@@ -49,7 +66,11 @@ static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 		area_sz = 0;
 		padding_sz = 0;
 	} else {
-		cl_sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+		long int s = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+		if (s <= 0 || s > (unsigned short int)~0) {
+			return NULL;
+		}
+		cl_sz = (unsigned short int)s;
 		unsigned short int diff = (cl_sz - (sz % cl_sz)) % cl_sz;
 		if ((unsigned short int)~0 - sz < diff) {
 			return NULL;
@@ -101,16 +122,17 @@ static void *ifc_area(struct ifc *ifc) {
 		}
 	}
 
-	#pragma GCC unroll 2
-	for (int it = 0; it < 2; ++it) {
-		for (unsigned int idx = likely_unoccupied; idx < n; ++idx) {
-			if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
-				tid[idx].tid = self;
-				return IFC_AREA(ifc, idx);
-			}
+	for (unsigned int idx = likely_unoccupied; idx < n; ++idx) {
+		if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
+			tid[idx].tid = self;
+			return IFC_AREA(ifc, idx);
 		}
-		n = likely_unoccupied;
-		likely_unoccupied = 0;
+	}
+	for (unsigned int idx = 0; idx < likely_unoccupied; ++idx) {
+		if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
+			tid[idx].tid = self;
+			return IFC_AREA(ifc, idx);
+		}
 	}
 
 	return NULL;
