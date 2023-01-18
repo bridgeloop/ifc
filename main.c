@@ -62,7 +62,6 @@ int main(void) {
 		exit(1);
 	}
 	clk(&(c));
-	c = 0;
 	clk(&(c));
 	size_t sum = 0;
 	ifc_iter(size_t)(ifc, area) {
