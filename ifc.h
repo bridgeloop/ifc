@@ -66,7 +66,21 @@ static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 		area_sz = 0;
 		padding_sz = 0;
 	} else {
+		#if defined(_SC_LEVEL1_DCACHE_LINESIZE)
 		long int s = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+		#elif defined(__APPLE__)
+		int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+		int s;
+		{
+			size_t sz;
+			if (sysctlbyname("hw.cachelinesize", &(s), &(sz), NULL, 0) != 0) {
+				s = 0;
+			}
+			assert(sz == sizeof(int));
+		}
+		#else
+		long int s = 0;
+		#endif
 		if (s <= 0 || s > (unsigned short int)~0) {
 			return NULL;
 		}
