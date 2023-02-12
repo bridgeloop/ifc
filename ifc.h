@@ -23,14 +23,16 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdbool.h>
 
+typedef void (*ifc_clean)(void *area, void *arg);
 struct ifc_head {
 	const unsigned int n;
 	const unsigned short int area_sz;
 	const unsigned short int padding_sz;
 };
 struct ifc_tid {
-	_Atomic unsigned char occupied;
+	_Atomic size_t occupied;
 	pthread_t tid;
 };
 
@@ -127,23 +129,27 @@ static void *ifc_area(struct ifc *ifc) {
 		likely_unoccupied = head->n;
 	struct ifc_tid *tid = IFC_TID(ifc);
 	for (unsigned int idx = 0; idx < n; ++idx) {
-		if (!tid[idx].occupied) {
+		_Atomic size_t *occupied = &(tid[idx].occupied);
+		if (!(*occupied)) {
 			likely_unoccupied = idx;
 			continue;
 		}
 		if (pthread_equal(tid[idx].tid, self)) {
+			__atomic_add_fetch(occupied, 1, __ATOMIC_RELAXED);
 			return IFC_AREA(ifc, idx);
 		}
 	}
 
 	for (unsigned int idx = likely_unoccupied; idx < n; ++idx) {
-		if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
+		size_t zero = 0;
+		if (__atomic_compare_exchange_n(&(tid[idx].occupied), &(zero), 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
 			tid[idx].tid = self;
 			return IFC_AREA(ifc, idx);
 		}
 	}
 	for (unsigned int idx = 0; idx < likely_unoccupied; ++idx) {
-		if (!__atomic_test_and_set(&(tid[idx].occupied), __ATOMIC_RELAXED)) {
+		size_t zero = 0;
+		if (__atomic_compare_exchange_n(&(tid[idx].occupied), &(zero), 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
 			tid[idx].tid = self;
 			return IFC_AREA(ifc, idx);
 		}
@@ -152,14 +158,26 @@ static void *ifc_area(struct ifc *ifc) {
 	return NULL;
 }
 
-static void ifc_release(struct ifc *ifc, void *area) {
+static void ifc_release_clean(struct ifc *ifc, void *area, ifc_clean clean, void *clean_arg) {
 	struct ifc_head *head = IFC_HEAD(ifc);
 	struct ifc_tid *tid = IFC_TID(ifc);
 	size_t idx = (size_t)((unsigned char *)area - IFC_AREAS(ifc)) / head->area_sz;
 	assert(pthread_equal(tid[idx].tid, pthread_self()));
-	__atomic_clear(&(tid[idx].occupied), __ATOMIC_RELEASE);
+	_Atomic size_t *occupied = &(tid[idx].occupied);
+	int memorder;
+	if (*occupied == 1) {
+		if (clean != NULL) {
+			clean(area, clean_arg);
+		}
+		memorder = __ATOMIC_RELEASE;
+	} else {
+		assert(*occupied != 0);
+		memorder = __ATOMIC_RELAXED;
+	}
+	__atomic_sub_fetch(occupied, 1, memorder);
 	return;
 }
+#define ifc_release(ifc, area) ifc_release_clean(ifc, area, NULL, NULL)
 
 static inline void *ifc_reap(struct ifc *ifc, void *area) {
 	struct ifc_head *head = IFC_HEAD(ifc);
