@@ -32,7 +32,7 @@ struct ifc_head {
 	const unsigned short int padding_sz;
 };
 struct ifc_tid {
-	_Atomic size_t occupied;
+	size_t occupied;
 	pthread_t tid;
 };
 
@@ -72,13 +72,13 @@ static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 		long int s = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
 		#elif defined(__APPLE__)
 		int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
-		int s;
+		long long int s;
 		{
-			size_t sz;
+			size_t sz = sizeof(long long int);
 			if (sysctlbyname("hw.cachelinesize", &(s), &(sz), NULL, 0) != 0) {
 				s = 0;
 			}
-			assert(sz == sizeof(int));
+			assert(sz == sizeof(long long int));
 		}
 		#else
 		long int s = 0;
@@ -129,8 +129,8 @@ static void *ifc_area(struct ifc *ifc) {
 		likely_unoccupied = head->n;
 	struct ifc_tid *tid = IFC_TID(ifc);
 	for (unsigned int idx = 0; idx < n; ++idx) {
-		_Atomic size_t *occupied = &(tid[idx].occupied);
-		if (!(*occupied)) {
+		size_t *occupied = &(tid[idx].occupied);
+		if (!__atomic_load_n(occupied, __ATOMIC_RELAXED)) {
 			likely_unoccupied = idx;
 			continue;
 		}
@@ -163,15 +163,16 @@ static void ifc_release_clean(struct ifc *ifc, void *area, ifc_clean clean, void
 	struct ifc_tid *tid = IFC_TID(ifc);
 	size_t idx = (size_t)((unsigned char *)area - IFC_AREAS(ifc)) / head->area_sz;
 	assert(pthread_equal(tid[idx].tid, pthread_self()));
-	_Atomic size_t *occupied = &(tid[idx].occupied);
+	size_t *occupied = &(tid[idx].occupied);
+	size_t capture = __atomic_load_n(occupied, __ATOMIC_RELAXED);
 	int memorder;
-	if (*occupied == 1) {
+	if (capture == 1) {
 		if (clean != NULL) {
 			clean(area, clean_arg);
 		}
 		memorder = __ATOMIC_RELEASE;
 	} else {
-		assert(*occupied != 0);
+		assert(capture != 0);
 		memorder = __ATOMIC_RELAXED;
 	}
 	__atomic_sub_fetch(occupied, 1, memorder);
