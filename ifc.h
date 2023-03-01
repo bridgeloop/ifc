@@ -32,8 +32,11 @@ struct ifc_head {
 	const unsigned short int padding_sz;
 };
 struct ifc_tid {
+	// occupied is conceptually a mutex (for the area itself)
 	size_t occupied;
+	// tid depends on tid_valid
 	pthread_t tid;
+	bool tid_valid;
 };
 
 #define _ifc_iter(ifc, area) *area = NULL; (area = ifc_reap(ifc, area)) != NULL;)
@@ -115,6 +118,7 @@ static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 	struct ifc_tid *tid = IFC_TID(ifc);
 	for (unsigned int idx = 0; idx < n; ++idx) {
 		tid[idx].occupied = 0;
+		tid[idx].tid_valid = false;
 	}
 	// IFC_AREAS are purposefully uninitialised
 	return (struct ifc *)ifc;
@@ -130,8 +134,14 @@ static void *ifc_area(struct ifc *ifc) {
 	struct ifc_tid *tid = IFC_TID(ifc);
 	for (unsigned int idx = 0; idx < n; ++idx) {
 		size_t *occupied = &(tid[idx].occupied);
-		if (!__atomic_load_n(occupied, __ATOMIC_RELAXED)) {
+		if (!__atomic_load_n(occupied, __ATOMIC_ACQUIRE)) {
 			likely_unoccupied = idx;
+			continue;
+		}
+
+		// acquire to ensure that `tid` is
+		// not loaded before `tid_valid`
+		if (!__atomic_load_n(&(tid[idx].tid_valid), __ATOMIC_ACQUIRE)) {
 			continue;
 		}
 		if (pthread_equal(tid[idx].tid, self)) {
@@ -144,6 +154,7 @@ static void *ifc_area(struct ifc *ifc) {
 		size_t zero = 0;
 		if (__atomic_compare_exchange_n(&(tid[idx].occupied), &(zero), 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
 			tid[idx].tid = self;
+			__atomic_store_n(&(tid[idx].tid_valid), true, __ATOMIC_RELEASE);
 			return IFC_AREA(ifc, idx);
 		}
 	}
@@ -151,13 +162,13 @@ static void *ifc_area(struct ifc *ifc) {
 		size_t zero = 0;
 		if (__atomic_compare_exchange_n(&(tid[idx].occupied), &(zero), 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
 			tid[idx].tid = self;
+			__atomic_store_n(&(tid[idx].tid_valid), true, __ATOMIC_RELEASE);
 			return IFC_AREA(ifc, idx);
 		}
 	}
 
 	return NULL;
 }
-
 static void ifc_release_clean(struct ifc *ifc, void *area, ifc_clean clean, void *clean_arg) {
 	struct ifc_head *head = IFC_HEAD(ifc);
 	struct ifc_tid *tid = IFC_TID(ifc);
@@ -165,17 +176,16 @@ static void ifc_release_clean(struct ifc *ifc, void *area, ifc_clean clean, void
 	assert(pthread_equal(tid[idx].tid, pthread_self()));
 	size_t *occupied = &(tid[idx].occupied);
 	size_t capture = __atomic_load_n(occupied, __ATOMIC_RELAXED);
-	int memorder;
 	if (capture == 1) {
 		if (clean != NULL) {
 			clean(area, clean_arg);
 		}
-		memorder = __ATOMIC_RELEASE;
+		__atomic_store_n(&(tid[idx].tid_valid), false, __ATOMIC_RELEASE);
+		__atomic_store_n(occupied, 0, __ATOMIC_RELEASE);
 	} else {
 		assert(capture != 0);
-		memorder = __ATOMIC_RELAXED;
+		__atomic_sub_fetch(occupied, 1, __ATOMIC_RELAXED);
 	}
-	__atomic_sub_fetch(occupied, 1, memorder);
 	return;
 }
 #define ifc_release(ifc, area) ifc_release_clean(ifc, area, NULL, NULL)
