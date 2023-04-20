@@ -51,6 +51,13 @@ struct ifc_tid {
 struct ifc;
 
 static void ifc_free(struct ifc *ifc) {
+	struct ifc_tid *tid = IFC_TID(ifc);
+	for (unsigned int idx = 0; idx < IFC_HEAD(ifc)->n; ++idx) {
+		if (tid[idx].tid_valid) {
+			abort();
+		}
+		assert(tid[idx].occupied == 0);
+	}
 	free(ifc);
 	return;
 }
