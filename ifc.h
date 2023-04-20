@@ -206,7 +206,7 @@ static inline void *ifc_reap(struct ifc *ifc, void *area) {
 		return IFC_AREA(ifc, 0);
 	}
 	area = (void *)((size_t)area + head->area_sz);
-	if (area == IFC_AREA(ifc, head->n + 1)) {
+	if (area == IFC_AREA(ifc, head->n)) {
 		return NULL;
 	}
 	return area;
