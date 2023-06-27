@@ -91,7 +91,7 @@ static struct ifc *ifc_alloc(unsigned int n, unsigned short int sz) {
 			assert(sz == sizeof(long long int));
 		}
 		#else
-		long int s = 0;
+		long int s = 64;
 		#endif
 		if (s <= 0 || s > (unsigned short int)~0) {
 			return NULL;
